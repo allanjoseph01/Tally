@@ -176,3 +176,51 @@ async function saveIdempotency(key: string, status: number, body: any) {
     console.error("Failed to save idempotency key:", err);
   }
 }
+
+// GET Handler to return the last 50 reservations ordered by createdAt desc
+export async function GET() {
+  try {
+    const reservations = await prisma.reservation.findMany({
+      take: 50,
+      orderBy: {
+        createdAt: "desc",
+      },
+      include: {
+        stock: {
+          include: {
+            product: true,
+            warehouse: true,
+          },
+        },
+      },
+    });
+
+    const formatted = reservations.map((res) => ({
+      id: res.id,
+      stockId: res.stockId,
+      quantity: res.quantity,
+      status: res.status,
+      expiresAt: res.expiresAt.toISOString(),
+      createdAt: res.createdAt.toISOString(),
+      updatedAt: res.updatedAt.toISOString(),
+      product: {
+        id: res.stock.product.id,
+        name: res.stock.product.name,
+        sku: res.stock.product.sku,
+      },
+      warehouse: {
+        id: res.stock.warehouse.id,
+        name: res.stock.warehouse.name,
+        location: res.stock.warehouse.location,
+      },
+    }));
+
+    return NextResponse.json(formatted, { status: 200 });
+  } catch (error: any) {
+    console.error("GET reservations list failed:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to fetch reservations" },
+      { status: 500 }
+    );
+  }
+}
