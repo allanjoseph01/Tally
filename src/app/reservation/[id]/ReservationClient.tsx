@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Clock, ShieldAlert, CheckCircle, XCircle } from "lucide-react";
+import ErrorBanner from "../../../components/ErrorBanner";
 
 interface ReservationClientProps {
   reservation: {
@@ -25,22 +26,28 @@ interface ReservationClientProps {
     };
     stock: {
       totalUnits: number;
+      disabledUnits?: number;
       reservedUnits: number;
     };
   };
 }
 
-export default function ReservationClient({ reservation }: ReservationClientProps) {
+export default function ReservationClient({ reservation: initialReservation }: ReservationClientProps) {
   const router = useRouter();
+  const [reservation, setReservation] = useState(initialReservation);
   const expiresAt = new Date(reservation.expiresAt);
 
   // Core interactive states
   const [status, setStatus] = useState(reservation.status);
-  const [loadingConfirm, setLoadingConfirm] = useState(false);
   const [loadingCancel, setLoadingCancel] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Razorpay Specific States
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<"idle" | "success" | "failed">("idle");
+  const [paymentId, setPaymentId] = useState<string | null>(null);
 
   // Calculate remaining seconds
   const getSecondsLeft = () => {
@@ -111,52 +118,135 @@ export default function ReservationClient({ reservation }: ReservationClientProp
     setStatus("RELEASED");
   };
 
-  // Confirm Purchase action
-  const handleConfirm = async () => {
-    setLoadingConfirm(true);
-    setErrorMsg(null);
+  // 1. Dynamic Script Loader helper for Razorpay modal
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window !== "undefined" && (window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  // 2. Main payment handler
+  const handlePayment = async () => {
+    setPaymentLoading(true);
+    setError(null);
     setErrorCode(null);
 
-    const idempotencyKey = crypto.randomUUID();
+    // Load script
+    const loaded = await loadRazorpayScript();
+    if (!loaded) {
+      setError("Payment gateway failed to load. Please try again.");
+      setPaymentLoading(false);
+      return;
+    }
 
     try {
-      const response = await fetch(`/api/reservations/${reservation.id}/confirm`, {
+      // Create order
+      const orderRes = await fetch("/api/payment/create-order", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "idempotency-key": idempotencyKey,
-        },
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reservationId: reservation.id,
+          amount: 49900, // ₹499 in paise — hardcoded for demo
+        }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 410) {
-          setErrorMsg("This reservation has expired.");
-          setErrorCode("RESERVATION_EXPIRED");
-          setStatus("RELEASED");
-        } else {
-          setErrorMsg(data.error || "Failed to confirm purchase.");
-          setErrorCode(data.code || null);
-        }
-        setLoadingConfirm(false);
+      if (!orderRes.ok) {
+        const err = await orderRes.json();
+        setError(err.error);
+        setPaymentLoading(false);
         return;
       }
 
-      setStatus("CONFIRMED");
-      setSuccessMsg("Purchase confirmed! 🎉");
+      const { orderId, amount, currency } = await orderRes.json();
+
+      // Open Razorpay modal
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: amount,
+        currency: currency,
+        name: "Tally",
+        description: `Hold: ${reservation.product.name}`,
+        order_id: orderId,
+        handler: async (response: any) => {
+          setPaymentLoading(true);
+          setError(null);
+          try {
+            // Payment succeeded — verify signature
+            const verifyRes = await fetch("/api/payment/verify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                reservationId: reservation.id,
+              }),
+            });
+
+            if (verifyRes.ok) {
+              const confirmed = await verifyRes.json();
+              const resData = confirmed.reservation || confirmed;
+              setReservation(resData);
+              setStatus(resData.status);
+              setPaymentId(confirmed.paymentId || response.razorpay_payment_id);
+              setPaymentStatus("success");
+            } else {
+              const err = await verifyRes.json();
+              setPaymentStatus("failed");
+              if (verifyRes.status === 410) {
+                setError("Your hold expired before payment completed.");
+                setStatus("RELEASED");
+              } else {
+                setError("Payment verification failed: " + err.error);
+              }
+            }
+          } catch (verifyErr) {
+            setError("Network error validating payment signatures.");
+            setPaymentStatus("failed");
+          } finally {
+            setPaymentLoading(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            // User closed the modal without paying
+            setPaymentLoading(false);
+            setError("Payment cancelled.");
+            setPaymentStatus("idle");
+          },
+        },
+        prefill: {
+          name: "Test User",
+          email: "test@example.com",
+          contact: "9999999999",
+        },
+        theme: {
+          color: "#FF6B2B", // match our accent color
+          backdrop_color: "rgba(0,0,0,0.9)",
+        },
+      };
+
+      const razorpay = new (window as any).Razorpay(options);
+      razorpay.open();
     } catch (err: any) {
-      setErrorMsg("Failed to connect to reservation confirmation engine.");
-      setErrorCode("NETWORK_ERROR");
-    } finally {
-      setLoadingConfirm(false);
+      setError("Failed to connect to checkout services. Please try again.");
+      setPaymentLoading(false);
+      setPaymentStatus("failed");
     }
   };
 
   // Cancel/Release action
   const handleCancel = async () => {
     setLoadingCancel(true);
-    setErrorMsg(null);
+    setError(null);
     setErrorCode(null);
 
     try {
@@ -166,7 +256,7 @@ export default function ReservationClient({ reservation }: ReservationClientProp
 
       if (!response.ok) {
         const data = await response.json();
-        setErrorMsg(data.error || "Failed to cancel reservation.");
+        setError(data.error || "Failed to cancel reservation.");
         setErrorCode(data.code || null);
         setLoadingCancel(false);
         return;
@@ -179,7 +269,7 @@ export default function ReservationClient({ reservation }: ReservationClientProp
         router.push("/");
       }, 2000);
     } catch (err: any) {
-      setErrorMsg("Failed to connect to cancellation engine.");
+      setError("Failed to connect to cancellation engine.");
       setErrorCode("NETWORK_ERROR");
       setLoadingCancel(false);
     }
@@ -343,6 +433,18 @@ export default function ReservationClient({ reservation }: ReservationClientProp
               </span>
             </div>
 
+            {/* Dynamic PAYMENT ID display once verified */}
+            {paymentId && (
+              <div className="flex flex-col gap-1.5 pb-3 border-b border-white/[0.04] bg-[var(--success-muted)] p-2.5 rounded-lg border border-[var(--success)]/20 animate-pulse-soft">
+                <span className="text-[10px] uppercase font-bold text-[var(--success)] tracking-wider">
+                  PAYMENT ID
+                </span>
+                <span className="text-xs font-mono text-[var(--success)] font-bold select-all">
+                  {paymentId}
+                </span>
+              </div>
+            )}
+
             <div className="flex justify-between items-center">
               <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
                 RESERVED AT
@@ -395,32 +497,45 @@ export default function ReservationClient({ reservation }: ReservationClientProp
               {/* Action Buttons */}
               <div className="flex flex-col gap-3 mt-4 w-full">
                 
-                {/* Confirm Purchase Button */}
+                {/* Pay ₹499 Razorpay checkout trigger button */}
                 <button
                   type="button"
-                  onClick={handleConfirm}
-                  disabled={loadingConfirm || loadingCancel}
-                  className="w-full h-12 flex items-center justify-center bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-black font-extrabold text-xs tracking-[0.15em] uppercase rounded-lg transition-colors border-0 cursor-pointer shadow-lg shadow-[var(--accent-primary)]/10 animate-pulse-soft"
+                  onClick={handlePayment}
+                  disabled={paymentLoading || loadingCancel}
+                  className="w-full h-12 flex items-center justify-center bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-black font-extrabold text-xs tracking-[0.15em] uppercase rounded-lg transition-colors border-0 cursor-pointer shadow-lg shadow-[var(--accent-primary)]/10"
                 >
-                  {loadingConfirm ? "CONFIRMING..." : "Confirm Purchase"}
+                  {paymentLoading ? "PROCESSING..." : "PAY ₹499 →"}
                 </button>
+
+                {/* Test Card specifications subtext */}
+                <span className="text-[10px] text-[var(--text-tertiary)] text-center block mt-1.5 leading-relaxed">
+                  Domestic Test Card: <strong className="font-mono text-xs text-[var(--text-primary)] font-bold select-all bg-white/[0.04] px-1 rounded">4100 2800 0000 1007</strong> · Any future date · Any CVV<br />
+                  <span className="opacity-65 text-[9px]">(Enter OTP 12345 to simulate success, or 123 to fail)</span>
+                </span>
 
                 {/* Cancel Hold Button */}
                 <button
                   type="button"
                   onClick={handleCancel}
-                  disabled={loadingConfirm || loadingCancel}
-                  className="w-full h-11 flex items-center justify-center bg-transparent border border-[var(--border-default)] hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:opacity-50 text-[var(--text-secondary)] font-bold text-xs uppercase rounded-lg transition-all cursor-pointer"
+                  disabled={paymentLoading || loadingCancel}
+                  className="w-full h-11 flex items-center justify-center bg-transparent border border-[var(--border-default)] hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:opacity-50 text-[var(--text-secondary)] font-bold text-xs uppercase rounded-lg transition-all cursor-pointer mt-2"
                 >
                   {loadingCancel ? "CANCELLING..." : "Cancel Reservation"}
                 </button>
 
               </div>
 
-              {/* Error messages display */}
-              {errorMsg && (
-                <div className="mt-4 text-xs font-mono font-semibold text-[var(--danger)] text-center uppercase tracking-wide leading-normal">
-                  ⚠ ERROR: {errorMsg}
+              {/* Error messages display (leverages ErrorBanner component dynamically) */}
+              {error && (
+                <div className="mt-4">
+                  <ErrorBanner
+                    message={error}
+                    code={errorCode || undefined}
+                    onDismiss={() => {
+                      setError(null);
+                      setErrorCode(null);
+                    }}
+                  />
                 </div>
               )}
 

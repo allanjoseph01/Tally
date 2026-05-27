@@ -92,6 +92,44 @@ curl -X POST https://tally-tool.netlify.app/api/reservations \
 
 ---
 
+## Payment Integration
+
+Tally integrates Razorpay in test mode to simulate a real checkout flow.
+
+### Flow
+1. User reserves a product → PENDING hold created (10 min window)
+2. On the checkout page, user clicks "PAY ₹499 →"
+3. Backend creates a Razorpay Order via the Razorpay API
+4. Frontend opens the Razorpay checkout modal
+5. User completes payment using a test card
+6. Razorpay returns payment_id + signature to the frontend
+7. Backend verifies the HMAC SHA256 signature using the Razorpay secret
+8. If valid → reservation is confirmed, stock is permanently decremented
+9. If expired during payment → 410 returned, hold already released
+
+### Signature Verification
+Payment confirmation is never trusted from the client alone. 
+The server independently verifies the Razorpay signature:
+
+```
+body = razorpay_order_id + "|" + razorpay_payment_id
+expectedSignature = HMAC_SHA256(body, RAZORPAY_KEY_SECRET)
+```
+
+If expectedSignature !== razorpay_signature → reject with 400.
+This prevents anyone from faking a successful payment.
+
+### Test Cards
+To complete simulated payments inside Razorpay test mode, use the following details based on your account settings:
+
+- **Domestic Indian Cards (Recommended):** `4100 2800 0000 1007` (Visa) or `5500 6700 0000 1002` (Mastercard)
+- **International Cards:** `4111 1111 1111 1111` (Requires international payments enabled on your Razorpay test dashboard)
+- **Expiry:** Any future date (e.g., `12/30`)
+- **CVV:** Any 3-digit number (e.g., `123`)
+- **Simulation OTP:** Enter any random **4-to-10 digit OTP** (e.g., `12345`) to simulate **Success**, or any **under-4-digit OTP** (e.g., `123`) to simulate **Failure**.
+
+---
+
 ## Running Locally
 
 ### Prerequisites
@@ -112,6 +150,9 @@ DATABASE_URL="postgresql://username:password@localhost:5432/tally?sslmode=requir
 UPSTASH_REDIS_REST_URL="https://your-redis-url.upstash.io"
 UPSTASH_REDIS_REST_TOKEN="your-redis-token"
 CRON_SECRET="your-local-cron-secret-12345"
+NEXT_PUBLIC_RAZORPAY_KEY_ID="rzp_test_your_key_id"
+RAZORPAY_KEY_ID="rzp_test_your_key_id"
+RAZORPAY_KEY_SECRET="your_key_secret"
 ```
 
 #### Environment Variables Reference
@@ -122,6 +163,9 @@ CRON_SECRET="your-local-cron-secret-12345"
 | **UPSTASH_REDIS_REST_URL** | REST URL for the serverless Upstash Redis instance (for rate limiting). |
 | **UPSTASH_REDIS_REST_TOKEN** | REST active token for Upstash Redis. |
 | **CRON_SECRET** | Bearer token that protects the expiry endpoint. Must match the Authorization header configured in cron-job.org. |
+| **NEXT_PUBLIC_RAZORPAY_KEY_ID** | Public Razorpay Test API Key ID. Used on the client side to instantiate the checkout overlay window. |
+| **RAZORPAY_KEY_ID** | Server Razorpay Test API Key ID. Used on the backend to connect to Razorpay services. |
+| **RAZORPAY_KEY_SECRET** | Razorpay Test API Key Secret. Used to securely verify HMAC-SHA256 signatures on the backend. |
 
 ### Step 3: Push Database Schema
 Apply the schema directly to your Postgres database:
