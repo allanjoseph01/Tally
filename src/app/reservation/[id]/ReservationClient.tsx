@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Clock, Loader2, ShieldAlert, XCircle } from "lucide-react";
-import ErrorBanner from "../../../components/ErrorBanner";
+import Link from "next/link";
+import { Clock, ShieldAlert, CheckCircle, XCircle } from "lucide-react";
 
 interface ReservationClientProps {
   reservation: {
@@ -47,9 +47,15 @@ export default function ReservationClient({ reservation }: ReservationClientProp
     return Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
   };
 
-  const [timeLeft, setTimeLeft] = useState(getSecondsLeft());
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
-  // Synchronize reservation status in localStorage on mount and updates
+  useEffect(() => {
+    setMounted(true);
+    setTimeLeft(getSecondsLeft());
+  }, []);
+
+  // Synchronize reservation status in localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -57,8 +63,7 @@ export default function ReservationClient({ reservation }: ReservationClientProp
       const list = existing ? JSON.parse(existing) : [];
       const index = list.findIndex((r: any) => r.id === reservation.id);
       if (index > -1) {
-        list[index].status = reservation.status;
-        list[index].expiresAt = reservation.expiresAt;
+        list[index].status = status;
         localStorage.setItem("tally_reservations", JSON.stringify(list));
       } else {
         list.push({
@@ -66,38 +71,21 @@ export default function ReservationClient({ reservation }: ReservationClientProp
           productId: reservation.product.id,
           warehouseId: reservation.warehouse.id,
           expiresAt: reservation.expiresAt,
-          status: reservation.status
+          status: status,
         });
         localStorage.setItem("tally_reservations", JSON.stringify(list));
       }
     } catch (err) {
       console.error("Failed to sync reservation in localStorage", err);
     }
-  }, [reservation.id, reservation.status, reservation.expiresAt, reservation.product.id, reservation.warehouse.id]);
-
-  // Synchronize status updates in localStorage (e.g. confirm, cancel, release)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const existing = localStorage.getItem("tally_reservations");
-      if (existing) {
-        const list = JSON.parse(existing);
-        const index = list.findIndex((r: any) => r.id === reservation.id);
-        if (index > -1 && list[index].status !== status) {
-          list[index].status = status;
-          localStorage.setItem("tally_reservations", JSON.stringify(list));
-        }
-      }
-    } catch (err) {
-      console.error("Failed to update status in localStorage", err);
-    }
-  }, [status, reservation.id]);
+  }, [reservation.id, status, reservation.expiresAt, reservation.product.id, reservation.warehouse.id]);
 
   // Countdown timer clock loop
   useEffect(() => {
     if (status !== "PENDING") return;
 
-    // Tick every second
+    setTimeLeft(getSecondsLeft());
+
     const interval = setInterval(() => {
       const seconds = getSecondsLeft();
       setTimeLeft(seconds);
@@ -121,8 +109,6 @@ export default function ReservationClient({ reservation }: ReservationClientProp
       console.error("Failed to release reservation hold automatically:", e);
     }
     setStatus("RELEASED");
-    setErrorMsg("Your inventory hold has expired.");
-    setErrorCode("RESERVATION_EXPIRED");
   };
 
   // Confirm Purchase action
@@ -130,9 +116,7 @@ export default function ReservationClient({ reservation }: ReservationClientProp
     setLoadingConfirm(true);
     setErrorMsg(null);
     setErrorCode(null);
-    setSuccessMsg(null);
 
-    // Concurrency prevention: supply a unique idempotency key
     const idempotencyKey = crypto.randomUUID();
 
     try {
@@ -174,7 +158,6 @@ export default function ReservationClient({ reservation }: ReservationClientProp
     setLoadingCancel(true);
     setErrorMsg(null);
     setErrorCode(null);
-    setSuccessMsg(null);
 
     try {
       const response = await fetch(`/api/reservations/${reservation.id}/release`, {
@@ -192,7 +175,6 @@ export default function ReservationClient({ reservation }: ReservationClientProp
       setStatus("RELEASED");
       setSuccessMsg("Reservation cancelled successfully. Returning to catalog...");
       
-      // Graceful delayed catalog redirect
       setTimeout(() => {
         router.push("/");
       }, 2000);
@@ -210,240 +192,314 @@ export default function ReservationClient({ reservation }: ReservationClientProp
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Theme states matching remaining time
-  const getCountdownConfig = (seconds: number) => {
+  // Format date helper
+  const formatDateTime = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  // Timer configuration based on urgency states
+  const getTimerStyles = (seconds: number) => {
     if (seconds > 180) {
       return {
-        colorClass: "text-zinc-400",
-        label: "Time remaining",
-        bgClass: "border-zinc-800 bg-zinc-900/20",
-        animateClass: "",
+        color: "text-[var(--text-primary)]",
+        barColor: "bg-[var(--text-primary)]",
+        glowColor: "rgba(255, 255, 255, 0.05)",
+        label: "SECURE INVENTORY LOCK",
       };
     } else if (seconds >= 60) {
       return {
-        colorClass: "text-warning",
-        label: "Expiring soon",
-        bgClass: "border-warning/10 bg-warning/5",
-        animateClass: "",
+        color: "text-[var(--warning)]",
+        barColor: "bg-[var(--warning)]",
+        glowColor: "rgba(245, 158, 11, 0.15)",
+        label: "EXPIRE ALERT SOON",
       };
     } else {
       return {
-        colorClass: "text-danger",
-        label: "Expiring!",
-        bgClass: "border-danger/10 bg-danger/5",
-        animateClass: "animate-countdown-urgent",
+        color: "text-[var(--danger)] blink",
+        barColor: "bg-[var(--danger)]",
+        glowColor: "rgba(239, 68, 68, 0.25)",
+        label: "RELEASE PENDING NOW",
       };
     }
   };
 
-  const timerConfig = getCountdownConfig(timeLeft);
+  const timerStyles = getTimerStyles(timeLeft);
+
+  // Time elapsed progress bar percentage
+  const totalWindow = 600;
+  const elapsedSeconds = Math.max(0, totalWindow - timeLeft);
+  const progressPercent = Math.min(100, (elapsedSeconds / totalWindow) * 100);
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
+    <div className="w-full max-w-[900px] mx-auto pt-10 px-4 md:px-6 flex flex-col gap-6 font-sans">
       
-      {/* Return button */}
-      <button
-        onClick={() => router.push("/")}
-        className="flex items-center gap-2 text-xs font-semibold text-zinc-500 hover:text-zinc-100 transition-colors uppercase tracking-widest cursor-pointer"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        <span>Return to Catalog</span>
-      </button>
+      {/* 1. TOP BREADCRUMB */}
+      <nav className="text-[10px] md:text-xs font-bold text-[var(--text-secondary)] uppercase tracking-[0.12em] select-none">
+        <Link href="/" className="hover:text-[var(--accent-primary)] transition-colors">
+          Catalog
+        </Link>
+        <span className="text-[var(--text-tertiary)] px-1"> / </span>
+        <span className="text-[var(--text-secondary)]">Reservation</span>
+        <span className="text-[var(--text-tertiary)] px-1"> / </span>
+        <span className="text-[var(--text-primary)] font-mono text-[10px] md:text-xs font-bold bg-white/[0.04] px-1.5 py-0.5 rounded">
+          {reservation.id.slice(0, 8)}
+        </span>
+      </nav>
 
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* 2. TWO COLUMN LAYOUT */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full items-start">
         
-        {/* LEFT COLUMN: Reservation Details Card (lg:span-7) */}
-        <div className="lg:col-span-7 border border-border rounded-lg bg-card p-6 md:p-8 space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                Holding ID
-              </span>
-              <p className="text-sm font-mono text-zinc-300 select-all mt-0.5">
-                {reservation.id}
-              </p>
-            </div>
-
+        {/* LEFT COLUMN: Hold Manifest Card */}
+        <section className="glow-card md:col-span-7 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl flex flex-col overflow-hidden">
+          
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] select-none">
+            <h2 className="text-xs font-extrabold tracking-wider text-[var(--text-primary)] uppercase">
+              HOLD MANIFEST
+            </h2>
+            
             {/* Reactive Status Badge */}
             {status === "PENDING" && (
-              <span className="text-[10px] font-bold text-warning px-3 py-1 rounded-full border border-warning/20 bg-warning/5 uppercase tracking-widest">
-                Pending Hold
+              <span className="px-2.5 py-0.5 text-[9px] font-bold tracking-widest border border-[var(--pending)] bg-[var(--pending-muted)] text-[var(--pending)] flex items-center gap-1.5 rounded-full select-none uppercase">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--pending)] blink" />
+                PENDING
               </span>
             )}
             {status === "CONFIRMED" && (
-              <span className="text-[10px] font-bold text-primary px-3 py-1 rounded-full border border-primary/20 bg-primary/5 uppercase tracking-widest">
-                Confirmed ✓
+              <span className="px-2.5 py-0.5 text-[9px] font-bold tracking-widest border border-[var(--success)] bg-[var(--success-muted)] text-[var(--success)] flex items-center gap-1 rounded-full select-none uppercase">
+                ✓ CONFIRMED
               </span>
             )}
             {status === "RELEASED" && (
-              <span className="text-[10px] font-bold text-zinc-500 px-3 py-1 rounded-full border border-zinc-700/80 bg-zinc-800/20 uppercase tracking-widest">
-                Released Hold
+              <span className="px-2.5 py-0.5 text-[9px] font-bold tracking-widest border border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)] flex items-center gap-1.5 rounded-full select-none uppercase">
+                ○ RELEASED
               </span>
             )}
           </div>
 
-          {/* Details Body */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-1">
-              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                Reserved Item
+          {/* Body manifest list */}
+          <div className="p-5 flex flex-col gap-4 select-text">
+            
+            <div className="flex flex-col gap-1 pb-3 border-b border-white/[0.04]">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                HOLD ID
               </span>
-              <p className="text-base font-bold text-zinc-200">{reservation.product.name}</p>
-              <p className="text-xs font-mono text-zinc-500">SKU: {reservation.product.sku}</p>
+              <span className="text-xs font-mono text-[var(--accent-primary)] font-bold select-all bg-white/[0.02] px-2 py-1 rounded inline-block w-fit">
+                {reservation.id}
+              </span>
             </div>
 
-            <div className="space-y-1">
-              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                Hold Location
+            <div className="flex flex-col gap-1 pb-3 border-b border-white/[0.04]">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                PRODUCT DETAILS
               </span>
-              <p className="text-base font-bold text-zinc-200">{reservation.warehouse.name}</p>
-              <p className="text-xs text-zinc-400">{reservation.warehouse.location}</p>
+              <span className="text-sm font-bold text-[var(--text-primary)] uppercase">
+                {reservation.product.name}
+              </span>
             </div>
+
+            <div className="flex flex-col gap-1 pb-3 border-b border-white/[0.04]">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                SKU
+              </span>
+              <span className="text-xs font-mono text-[var(--text-primary)] font-semibold uppercase">
+                {reservation.product.sku}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1 pb-3 border-b border-white/[0.04]">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                WAREHOUSE
+              </span>
+              <span className="text-xs font-bold text-[var(--text-primary)] uppercase">
+                {reservation.warehouse.name}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1 pb-3 border-b border-white/[0.04]">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                LOCATION
+              </span>
+              <span className="text-xs font-bold text-[var(--text-primary)] uppercase">
+                {reservation.warehouse.location}
+              </span>
+            </div>
+
+            <div className="flex justify-between items-center pb-3 border-b border-white/[0.04]">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                QTY HELD
+              </span>
+              <span className="text-xs font-mono text-[var(--text-primary)] font-bold bg-white/[0.04] px-2 py-0.5 rounded">
+                {reservation.quantity} UNITS
+              </span>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider">
+                RESERVED AT
+              </span>
+              <span className="text-xs font-mono text-[var(--text-primary)]">
+                {formatDateTime(reservation.createdAt)}
+              </span>
+            </div>
+
           </div>
+        </section>
 
-          <div className="w-full h-px bg-zinc-850" />
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                Reserved Quantity
-              </span>
-              <p className="text-2xl font-bold font-mono text-zinc-200 mt-1">
-                {reservation.quantity} <span className="text-sm font-sans font-normal text-zinc-500">units</span>
-              </p>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                Hold Created
-              </span>
-              <p className="text-sm font-mono text-zinc-300 mt-1">
-                {new Date(reservation.createdAt).toLocaleTimeString(undefined, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Action Card (lg:span-5) */}
-        <div className="lg:col-span-5 flex flex-col justify-between border border-border rounded-lg bg-card p-6 md:p-8 space-y-6">
+        {/* RIGHT COLUMN: Action Card */}
+        <section className="md:col-span-5 flex flex-col gap-6 w-full shrink-0 select-none">
           
-          {/* Active Pending Hold Timer */}
-          {status === "PENDING" && (
-            <div className={`flex flex-col items-center justify-center p-6 border rounded-lg transition-all duration-500 ${timerConfig.bgClass}`}>
-              <Clock className={`w-5 h-5 mb-2 ${timerConfig.colorClass}`} />
-              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">
-                {timerConfig.label}
-              </span>
-              <span className={`text-4xl font-extrabold font-mono mt-1 ${timerConfig.colorClass} ${timerConfig.animateClass}`}>
-                {formatTime(timeLeft)}
-              </span>
-            </div>
-          )}
+          {/* Active Pending view */}
+          {status === "PENDING" && timeLeft > 0 && (
+            <div className="glow-card bg-[var(--bg-surface)] border border-[var(--border-default)] p-6 flex flex-col w-full rounded-xl overflow-hidden">
+              
+              {/* COUNTDOWN TIMER STATEMENT PIECE */}
+              <div className="flex flex-col items-center justify-center py-4 w-full">
+                
+                <span className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-[0.15em] mb-2.5 block text-center">
+                  TIME REMAINING
+                </span>
 
-          {/* Success Banner */}
-          {successMsg && (
-            <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-xs font-bold text-primary uppercase tracking-wide">Success</h4>
-                <p className="text-xs text-zinc-300 mt-1 leading-relaxed">{successMsg}</p>
+                {/* Highly-styled central time readout with shadow glow */}
+                <div 
+                  className={`text-6xl md:text-7xl font-extrabold font-mono text-center block mb-2 transition-colors duration-500`}
+                  style={{ textShadow: `0 0 25px ${timerStyles.glowColor}` }}
+                  suppressHydrationWarning
+                >
+                  {mounted ? formatTime(timeLeft) : "00:00"}
+                </div>
+
+                {/* Urgency status */}
+                <span className={`text-[10px] font-bold tracking-[0.2em] mb-4 text-center block select-none ${timerStyles.color}`}>
+                  {timerStyles.label}
+                </span>
+
+                {/* Thin progress bar */}
+                <div className="w-full bg-white/[0.04] h-1.5 rounded-full overflow-hidden my-2">
+                  <div
+                    className={`h-full ${timerStyles.barColor} transition-all duration-1000 rounded-full`}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
               </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col gap-3 mt-4 w-full">
+                
+                {/* Confirm Purchase Button */}
+                <button
+                  type="button"
+                  onClick={handleConfirm}
+                  disabled={loadingConfirm || loadingCancel}
+                  className="w-full h-12 flex items-center justify-center bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-black font-extrabold text-xs tracking-[0.15em] uppercase rounded-lg transition-colors border-0 cursor-pointer shadow-lg shadow-[var(--accent-primary)]/10 animate-pulse-soft"
+                >
+                  {loadingConfirm ? "CONFIRMING..." : "Confirm Purchase"}
+                </button>
+
+                {/* Cancel Hold Button */}
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={loadingConfirm || loadingCancel}
+                  className="w-full h-11 flex items-center justify-center bg-transparent border border-[var(--border-default)] hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:opacity-50 text-[var(--text-secondary)] font-bold text-xs uppercase rounded-lg transition-all cursor-pointer"
+                >
+                  {loadingCancel ? "CANCELLING..." : "Cancel Reservation"}
+                </button>
+
+              </div>
+
+              {/* Error messages display */}
+              {errorMsg && (
+                <div className="mt-4 text-xs font-mono font-semibold text-[var(--danger)] text-center uppercase tracking-wide leading-normal">
+                  ⚠ ERROR: {errorMsg}
+                </div>
+              )}
+
             </div>
           )}
 
-          {/* Error Banner */}
-          {errorMsg && (
-            <div className="my-1">
-              <ErrorBanner
-                message={errorMsg}
-                code={errorCode || undefined}
-                onDismiss={() => {
-                  setErrorMsg(null);
-                  setErrorCode(null);
-                }}
-              />
-            </div>
-          )}
-
-          {/* Interactive States Details */}
-          {status === "PENDING" && (
-            <div className="space-y-4">
-              <button
-                type="button"
-                onClick={handleConfirm}
-                disabled={loadingConfirm || loadingCancel}
-                className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 font-bold py-4 rounded-lg transition-all duration-300 cursor-pointer"
-              >
-                {loadingConfirm ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Confirming...</span>
-                  </>
-                ) : (
-                  <span>Confirm Purchase</span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={loadingConfirm || loadingCancel}
-                className="w-full flex items-center justify-center gap-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-50 text-zinc-400 py-3.5 rounded-lg transition-colors cursor-pointer"
-              >
-                {loadingCancel ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <span>Cancel Reservation</span>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* Confirmed Success State Display */}
+          {/* Confirm Success State Display */}
           {status === "CONFIRMED" && (
-            <div className="space-y-4 py-4 text-center">
-              <CheckCircle2 className="w-12 h-12 text-primary mx-auto" />
-              <div>
-                <h3 className="text-lg font-bold text-zinc-100">Order Locked</h3>
-                <p className="text-xs text-zinc-500 mt-1 leading-relaxed max-w-xs mx-auto">
-                  Hold resolved. Stock count permanently reduced from {reservation.warehouse.name}.
-                </p>
+            <div className="glow-card bg-[var(--bg-surface)] border border-[var(--border-default)] p-6 text-center flex flex-col items-center justify-center w-full rounded-xl py-10">
+              
+              <div className="w-12 h-12 rounded-full bg-[var(--success-muted)] border border-[var(--success)] flex items-center justify-center mb-4 text-[var(--success)] shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                <CheckCircle className="w-6 h-6" />
               </div>
-              <div className="w-full h-px bg-zinc-850 my-2" />
+
+              <h3 className="text-base font-bold text-[var(--success)] uppercase tracking-wider mb-2 font-sans">
+                PURCHASE CONFIRMED
+              </h3>
+              <p className="text-xs text-[var(--text-secondary)] uppercase tracking-wider mb-6 max-w-[240px] leading-relaxed">
+                Hold locks resolved. Stock levels permanently adjusted.
+              </p>
+              
               <button
                 onClick={() => router.push("/")}
-                className="w-full bg-zinc-850 hover:bg-zinc-800 text-zinc-300 font-semibold py-3 rounded-lg transition-colors cursor-pointer"
+                className="w-full h-11 flex items-center justify-center bg-[var(--bg-elevated)] border border-[var(--border-default)] hover:bg-[var(--bg-base)] text-[var(--text-primary)] font-bold text-xs uppercase rounded-lg transition-colors cursor-pointer"
               >
-                Back to Products
+                Return to catalog
               </button>
             </div>
           )}
 
-          {/* Released Expiration State Display */}
-          {status === "RELEASED" && (
-            <div className="space-y-4 py-4 text-center">
-              <XCircle className="w-12 h-12 text-zinc-600 mx-auto" />
-              <div>
-                <h3 className="text-lg font-bold text-zinc-400">Hold Released</h3>
-                <p className="text-xs text-zinc-500 mt-1 leading-relaxed max-w-xs mx-auto">
-                  Inventory is returned to {reservation.warehouse.name} and available for other shoppers.
-                </p>
+          {/* Released State Display */}
+          {status === "RELEASED" && timeLeft > 0 && (
+            <div className="glow-card bg-[var(--bg-surface)] border border-[var(--border-default)] p-6 text-center flex flex-col items-center justify-center w-full rounded-xl py-10">
+              
+              <div className="w-12 h-12 rounded-full bg-white/[0.02] border border-[var(--border-default)] flex items-center justify-center mb-4 text-[var(--text-secondary)]">
+                <XCircle className="w-6 h-6" />
               </div>
-              <div className="w-full h-px bg-zinc-850 my-2" />
+
+              <h3 className="text-base font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">
+                HOLD RELEASED
+              </h3>
+              <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider mb-6 max-w-[240px] leading-normal">
+                Inventory has been returned to stock. Redirecting to catalog...
+              </p>
+
               <button
                 onClick={() => router.push("/")}
-                className="w-full bg-primary hover:bg-emerald-600 text-zinc-950 font-bold py-3.5 rounded-lg transition-colors cursor-pointer"
+                className="w-full h-11 flex items-center justify-center bg-[var(--bg-elevated)] border border-[var(--border-default)] text-[var(--text-tertiary)] font-bold text-xs uppercase rounded-lg cursor-default"
               >
-                Browse Catalog
+                Redirecting...
               </button>
             </div>
           )}
 
-        </div>
+          {/* Expired State Display (Timer hits 0) */}
+          {(status === "RELEASED" || status === "PENDING") && timeLeft <= 0 && (
+            <div className="glow-card bg-[var(--bg-surface)] border border-[var(--border-default)] p-6 text-center flex flex-col items-center justify-center w-full rounded-xl py-10">
+              
+              <div className="w-12 h-12 rounded-full bg-[var(--danger-muted)] border border-[var(--danger)] flex items-center justify-center mb-4 text-[var(--danger)] shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+
+              <h3 className="text-base font-bold text-[var(--danger)] uppercase tracking-wider mb-2 blink">
+                HOLD EXPIRED
+              </h3>
+              <p className="text-xs text-[var(--text-secondary)] uppercase tracking-wider mb-6 max-w-[240px] leading-relaxed">
+                This reservation has expired and units have been returned to available stock.
+              </p>
+              
+              <button
+                onClick={() => router.push("/")}
+                className="w-full h-11 flex items-center justify-center bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-black font-bold text-xs uppercase rounded-lg transition-colors cursor-pointer border-0 shadow-lg shadow-[var(--accent-primary)]/10"
+              >
+                Browse catalog →
+              </button>
+            </div>
+          )}
+
+        </section>
 
       </div>
     </div>

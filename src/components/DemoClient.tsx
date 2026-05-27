@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Zap } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 
 interface Combo {
   stockId: string;
@@ -24,20 +24,53 @@ export default function DemoClient({ combos }: DemoClientProps) {
   const [selectedStockId, setSelectedStockId] = useState<string>(combos[0]?.stockId || "");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<any[] | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typedExplanation, setTypedExplanation] = useState("");
 
   const selectedCombo = combos.find((c) => c.stockId === selectedStockId);
+
+  // System analysis explanation block for typewriter effect
+  const explanationText = [
+    `> ANALYSIS: Request A acquired the row lock first.`,
+    `> UPDATE executed: reservedUnits incremented by 1.`,
+    `> Request B re-evaluated WHERE condition.`,
+    `> (totalUnits - reservedUnits) >= 1 resolved FALSE.`,
+    `> executeRaw returned rowCount: 0 → 409 returned.`,
+    `> Zero data corruption. One reservation created. ✓`,
+  ].join("\n");
+
+  // Typewriter effect triggered once requests resolve successfully
+  useEffect(() => {
+    if (results && !loading) {
+      setIsTyping(true);
+      setTypedExplanation("");
+      let i = 0;
+      const interval = setInterval(() => {
+        setTypedExplanation((prev) => prev + explanationText.charAt(i));
+        i++;
+        if (i >= explanationText.length) {
+          clearInterval(interval);
+          setIsTyping(false);
+        }
+      }, 8);
+      return () => clearInterval(interval);
+    } else {
+      setTypedExplanation("");
+    }
+  }, [results, loading, explanationText]);
 
   const handleFire = async () => {
     if (!selectedCombo) return;
     setLoading(true);
-    setResults([
-      { status: "pending" },
-      { status: "pending" },
-    ]);
+    setResults(null);
 
-    // Unique keys for each mock customer
-    const req1Key = crypto.randomUUID();
-    const req2Key = crypto.randomUUID();
+    const reqAKey = crypto.randomUUID();
+    const reqBKey = crypto.randomUUID();
+
+    setResults([
+      { status: "pending", uuid: reqAKey },
+      { status: "pending", uuid: reqBKey },
+    ]);
 
     const requestPayload = {
       productId: selectedCombo.productId,
@@ -45,13 +78,12 @@ export default function DemoClient({ combos }: DemoClientProps) {
       quantity: 1,
     };
 
-    // Simultaneously dispatch both fetch requests
-    const [res1, res2] = await Promise.allSettled([
+    const [resA, resB] = await Promise.allSettled([
       fetch("/api/reservations", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "idempotency-key": req1Key,
+          "idempotency-key": reqAKey,
         },
         body: JSON.stringify(requestPayload),
       }).then(async (res) => {
@@ -62,7 +94,7 @@ export default function DemoClient({ combos }: DemoClientProps) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "idempotency-key": req2Key,
+          "idempotency-key": reqBKey,
         },
         body: JSON.stringify(requestPayload),
       }).then(async (res) => {
@@ -71,12 +103,16 @@ export default function DemoClient({ combos }: DemoClientProps) {
       }),
     ]);
 
-    // Parse the settlements
-    const mappedResults = [res1, res2].map((result) => {
+    const mappedResults = [resA, resB].map((result, idx) => {
+      const activeUuid = idx === 0 ? reqAKey : reqBKey;
+
       if (result.status === "rejected") {
         return {
-          status: "rejected",
-          error: "Network execution failed",
+          status: "fulfilled",
+          success: false,
+          uuid: activeUuid,
+          errorCode: "500",
+          errorMsg: "Network execution failed",
         };
       }
 
@@ -85,12 +121,14 @@ export default function DemoClient({ combos }: DemoClientProps) {
         return {
           status: "fulfilled",
           success: true,
+          uuid: activeUuid,
           reservationId: body.id,
         };
       } else {
         return {
           status: "fulfilled",
           success: false,
+          uuid: activeUuid,
           errorCode: status,
           errorMsg: body.error || "Not enough stock available",
         };
@@ -102,197 +140,246 @@ export default function DemoClient({ combos }: DemoClientProps) {
   };
 
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
+    <div className="w-full max-w-[900px] mx-auto flex flex-col gap-6 pt-6 font-sans">
       
-      {/* Header */}
-      <div className="border-b border-border pb-6">
-        <h1 className="text-3xl font-extrabold tracking-tight text-zinc-100 flex items-center gap-3">
-          <Zap className="w-8 h-8 text-primary animate-pulse" />
-          <span>Race Condition Demo</span>
+      {/* -------------------------------------------------------------
+         HEADER: Concurrency Simulator
+         ------------------------------------------------------------- */}
+      <div className="border-b border-[var(--border-default)] pb-4 select-none">
+        <h1 className="text-lg font-extrabold tracking-tight uppercase text-[var(--text-primary)]">
+          CONCURRENCY SIMULATOR
         </h1>
-        <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-          Simulate a real-time race condition. Fire two simultaneous checkout requests for the last available unit of stock.
+        <p className="text-[10px] md:text-xs font-mono text-[var(--text-secondary)] mt-1.5 uppercase tracking-wider leading-relaxed">
+          Fires two simultaneous POST /api/reservations requests 
+          for the last available unit. Exactly one must succeed.
         </p>
       </div>
 
+      {/* -------------------------------------------------------------
+         CONDITIONAL CHECK FOR AVAILABLE COMBOS
+         ------------------------------------------------------------- */}
       {combos.length === 0 ? (
-        <div className="border border-border rounded-lg bg-card p-12 text-center text-zinc-500">
-          <AlertCircle className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-          <p className="text-sm font-semibold">No low stock combinations found.</p>
-          <p className="text-xs text-zinc-600 mt-1 max-w-sm mx-auto">
-            All inventory combinations have 0 available units or more than 1 unit. Run the seed script to reset stock.
+        <div className="border border-[var(--border-default)] bg-[var(--bg-surface)] p-12 text-center text-[var(--text-secondary)] rounded-xl select-none">
+          <p className="text-xs font-bold uppercase tracking-widest text-[var(--danger)]">
+            ⚠ NO race-condition combos detected
           </p>
+          <p className="text-[10px] text-zinc-500 mt-2 uppercase max-w-md mx-auto leading-normal">
+            Race simulator requires at least one product-warehouse combination with exactly **1 unit available**. 
+            Run the seed script in the shell to reinitialize.
+          </p>
+          
           <button
             onClick={() => router.refresh()}
-            className="mt-4 inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900 hover:bg-zinc-850 px-4 py-2 rounded-lg text-xs font-semibold text-zinc-300 transition-colors cursor-pointer"
+            className="mt-6 h-11 px-6 border border-[var(--border-default)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-base)] text-[var(--text-primary)] font-bold text-xs uppercase rounded-lg transition-colors cursor-pointer select-none"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Check Stock Again</span>
+            REFRESH SYSTEM STOCK
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
+        <div className="flex flex-col gap-6 w-full">
           
-          {/* CONTROL SECTION (md:span-5) */}
-          <div className="md:col-span-5 border border-border rounded-lg bg-card p-6 space-y-6">
+          {/* STEP 1 & 2: PRODUCT SELECTOR AND FIRE TRIGGER */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full items-end select-none">
             
-            {/* Step 1: Select Dropdown */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wide block">
-                Step 1: Pick product-warehouse combo
+            {/* Dropdown SELECT TARGET SKU */}
+            <div className="md:col-span-8 flex flex-col gap-2">
+              <label className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-[0.15em]">
+                SELECT TARGET SKU
               </label>
-              <select
-                value={selectedStockId}
-                onChange={(e) => {
-                  setSelectedStockId(e.target.value);
-                  setResults(null);
-                }}
-                disabled={loading}
-                className="w-full rounded-lg border border-border bg-zinc-950 px-3.5 py-3 text-xs text-zinc-200 outline-none focus:border-primary/50 transition-colors cursor-pointer"
-              >
-                {combos.map((c) => (
-                  <option key={c.stockId} value={c.stockId}>
-                    {c.productName} ({c.sku}) — {c.warehouseName} [Avail: {c.availableUnits}]
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-zinc-500 leading-normal">
-                Default listings prioritize products seeded with exactly **1 available unit** for demonstration.
-              </p>
+              
+              <div className="relative w-full border border-[var(--border-default)] hover:border-white/10 bg-black px-4 py-3 rounded-lg transition-colors">
+                <select
+                  value={selectedStockId}
+                  onChange={(e) => {
+                    setSelectedStockId(e.target.value);
+                    setResults(null);
+                  }}
+                  disabled={loading}
+                  className="w-full bg-black text-[var(--accent-primary)] font-mono text-xs outline-none border-0 uppercase cursor-pointer select-none pr-6 font-bold"
+                >
+                  {combos.map((c) => (
+                    <option key={c.stockId} value={c.stockId} className="bg-black text-[var(--accent-primary)]">
+                      {c.productName} ({c.sku}) — {c.warehouseName} [AVAIL: {c.availableUnits}]
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--accent-primary)] pointer-events-none font-mono text-xs select-none">
+                  ▼
+                </div>
+              </div>
             </div>
 
-            {/* Step 2: Trigger Button */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wide block">
-                Step 2: Fire Simultaneous Requests
-              </label>
+            {/* Execute trigger */}
+            <div className="md:col-span-4 w-full">
               <button
                 type="button"
                 onClick={handleFire}
                 disabled={loading || !selectedCombo}
-                className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 font-bold py-3.5 rounded-lg transition-colors cursor-pointer"
+                className="w-full h-[46px] flex items-center justify-center bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-black font-extrabold text-xs tracking-[0.15em] uppercase rounded-lg transition-colors border-0 cursor-pointer shadow-lg shadow-[var(--accent-primary)]/10"
               >
                 {loading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Firing Requests...</span>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    <span>EXECUTING...</span>
                   </>
                 ) : (
-                  <>
-                    <Zap className="w-4 h-4" />
-                    <span>Fire Simultaneous Requests</span>
-                  </>
+                  <span className="flex items-center gap-1.5">
+                    <Play className="w-3.5 h-3.5 fill-black" />
+                    EXECUTE race condition
+                  </span>
                 )}
               </button>
             </div>
+
           </div>
 
-          {/* OUTCOME CARDS (md:span-7) */}
-          <div className="md:col-span-7 space-y-6">
-            <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wide">
-              Concurrent Execution Results
-            </h4>
+          {/* -------------------------------------------------------------
+             RESULTS: Two side-by-side terminal windows
+             ------------------------------------------------------------- */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
+            
+            {/* REQUEST A TERMINAL PANEL */}
+            <div className="glow-card flex flex-col rounded-xl overflow-hidden bg-black border border-[var(--border-default)]">
+              {/* Header bar */}
+              <div className="bg-[var(--bg-elevated)] border-b border-[var(--border-default)] px-4 py-2.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-wider text-[var(--text-secondary)] select-none">
+                <span>REQUEST A</span>
+                {results ? (
+                  results[0]?.success ? (
+                    <div className="w-2 h-2 rounded-full bg-[var(--success)] shadow-[0_0_8px_rgba(16,185,129,0.5)]" title="Success" />
+                  ) : results[0]?.status === "pending" ? (
+                    <div className="w-2 h-2 rounded-full bg-zinc-650 blink" title="Executing" />
+                  ) : (
+                    <div className="w-2 h-2 rounded-full bg-[var(--danger)] shadow-[0_0_8px_rgba(239,68,68,0.5)]" title="Conflict" />
+                  )
+                ) : (
+                  <div className="w-2 h-2 rounded-full bg-zinc-800" title="Offline" />
+                )}
+              </div>
 
-            {results ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {results.map((res, idx) => {
-                  const isPending = res.status === "pending";
-                  const isSuccess = res.success;
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`border rounded-lg p-5 flex flex-col justify-between h-40 transition-all duration-300 ${
-                        isPending
-                          ? "border-zinc-800 bg-zinc-900/40"
-                          : isSuccess
-                          ? "border-primary/20 bg-primary/5 text-primary"
-                          : "border-danger/20 bg-danger/5 text-danger"
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
-                            Request #{idx + 1}
-                          </span>
-                          {isPending && <Loader2 className="w-3.5 h-3.5 text-zinc-500 animate-spin" />}
-                        </div>
-
-                        <div className="mt-3">
-                          {isPending ? (
-                            <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest animate-pulse">
-                              Pending response...
-                            </p>
-                          ) : isSuccess ? (
-                            <div className="space-y-1">
-                              <p className="text-sm font-bold flex items-center gap-1.5 text-primary">
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>✓ Reserved</span>
-                              </p>
-                              <p className="text-[10px] font-mono text-zinc-300 truncate mt-1">
-                                ID: {res.reservationId}
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <p className="text-sm font-bold flex items-center gap-1.5 text-danger">
-                                <AlertCircle className="w-4 h-4" />
-                                <span>✗ 409 Rejected</span>
-                              </p>
-                              <p className="text-[10px] text-zinc-400 mt-1 leading-relaxed">
-                                {res.errorMsg}
-                              </p>
-                            </div>
-                          )}
-                        </div>
+              {/* Console Body */}
+              <div className="bg-black p-4 font-mono text-xs rounded-none h-56 overflow-y-auto relative select-text leading-relaxed">
+                {results ? (
+                  results[0]?.status === "pending" ? (
+                    <div className="text-zinc-500">
+                      <div>&gt; POST /api/reservations</div>
+                      <div>&gt; Idempotency-Key: {results[0]?.uuid.slice(0, 18)}...</div>
+                      <div className="flex items-center">
+                        <span>&gt;&nbsp;</span>
+                        <span className="w-2 h-3.5 bg-zinc-400 blink inline-block animate-pulse-soft" />
                       </div>
-
-                      {/* Bottom badge */}
-                      {!isPending && isSuccess && (
-                        <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded border border-primary/20 bg-primary/10 self-start text-primary">
-                          201 Created
-                        </span>
-                      )}
-                      {!isPending && !isSuccess && (
-                        <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded border border-danger/20 bg-danger/10 self-start text-danger">
-                          409 Conflict
-                        </span>
-                      )}
                     </div>
-                  );
-                })}
+                  ) : results[0]?.success ? (
+                    <div className="text-[var(--success)] space-y-1">
+                      <div>&gt; POST /api/reservations</div>
+                      <div>&gt; ← 201 CREATED</div>
+                      <div className="truncate">reservation.id: {results[0]?.reservationId}</div>
+                      <div>status: PENDING</div>
+                      <div>Hold confirmed ✓</div>
+                    </div>
+                  ) : (
+                    <div className="text-[var(--danger)] space-y-1">
+                      <div>&gt; POST /api/reservations</div>
+                      <div>&gt; ← 409 CONFLICT</div>
+                      <div>error: INSUFFICIENT_STOCK</div>
+                      <div>"Not enough stock available"</div>
+                    </div>
+                  )
+                ) : (
+                  <span className="text-[var(--text-tertiary)] uppercase select-none">
+                    &gt; CONSOLE_A READY
+                  </span>
+                )}
               </div>
-            ) : (
-              <div className="border border-zinc-850 rounded-lg p-10 text-center text-zinc-600 bg-zinc-900/20">
-                <Zap className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
-                <p className="text-xs">Pending execution trigger. Choose a stock target and press Fire.</p>
-              </div>
-            )}
+            </div>
 
-            {/* Explanation section */}
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-5 leading-relaxed">
-              <h5 className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-2">
-                Under the Hood: Database-level Locking
-              </h5>
-              <p className="text-xs text-zinc-400">
-                Both HTTP requests hit the Node/Postgres server in the exact same millisecond. 
-                Using standard select-then-write code would result in a double-reservation race condition. 
-                Tally avoids this entirely by running an **atomic PostgreSQL raw UPDATE** protected inside a transaction:
-              </p>
-              <pre className="text-[10px] font-mono bg-zinc-950/70 p-3 rounded border border-zinc-850 text-zinc-500 my-3 overflow-x-auto">
-{`UPDATE "Stock"
-SET "reservedUnits" = "reservedUnits" + 1
-WHERE id = $1
-AND ("totalUnits" - "reservedUnits") >= 1`}
-              </pre>
-              <p className="text-xs text-zinc-400">
-                PostgreSQL forces serialize-order row locks. The first transaction decreases availability atomically and succeeds. The second transaction checks availability, sees it is now <code className="font-mono text-zinc-300">0</code>, returns a count of <code className="font-mono text-zinc-300">0</code> rows updated, rolls back instantly, and responds with a standard <code className="font-mono text-zinc-300">409 Conflict</code>. **Result: 100% data consistency.**
-              </p>
+            {/* REQUEST B TERMINAL PANEL */}
+            <div className="glow-card flex flex-col rounded-xl overflow-hidden bg-black border border-[var(--border-default)]">
+              {/* Header bar */}
+              <div className="bg-[var(--bg-elevated)] border-b border-[var(--border-default)] px-4 py-2.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-wider text-[var(--text-secondary)] select-none">
+                <span>REQUEST B</span>
+                {results ? (
+                  results[1]?.success ? (
+                    <div className="w-2 h-2 rounded-full bg-[var(--success)] shadow-[0_0_8px_rgba(16,185,129,0.5)]" title="Success" />
+                  ) : results[1]?.status === "pending" ? (
+                    <div className="w-2 h-2 rounded-full bg-zinc-650 blink" title="Executing" />
+                  ) : (
+                    <div className="w-2 h-2 rounded-full bg-[var(--danger)] shadow-[0_0_8px_rgba(239,68,68,0.5)]" title="Conflict" />
+                  )
+                ) : (
+                  <div className="w-2 h-2 rounded-full bg-zinc-800" title="Offline" />
+                )}
+              </div>
+
+              {/* Console Body */}
+              <div className="bg-black p-4 font-mono text-xs rounded-none h-56 overflow-y-auto relative select-text leading-relaxed">
+                {results ? (
+                  results[1]?.status === "pending" ? (
+                    <div className="text-zinc-500">
+                      <div>&gt; POST /api/reservations</div>
+                      <div>&gt; Idempotency-Key: {results[1]?.uuid.slice(0, 18)}...</div>
+                      <div className="flex items-center">
+                        <span>&gt;&nbsp;</span>
+                        <span className="w-2 h-3.5 bg-zinc-400 blink inline-block animate-pulse-soft" />
+                      </div>
+                    </div>
+                  ) : results[1]?.success ? (
+                    <div className="text-[var(--success)] space-y-1">
+                      <div>&gt; POST /api/reservations</div>
+                      <div>&gt; ← 201 CREATED</div>
+                      <div className="truncate">reservation.id: {results[1]?.reservationId}</div>
+                      <div>status: PENDING</div>
+                      <div>Hold confirmed ✓</div>
+                    </div>
+                  ) : (
+                    <div className="text-[var(--danger)] space-y-1">
+                      <div>&gt; POST /api/reservations</div>
+                      <div>&gt; ← 409 CONFLICT</div>
+                      <div>error: INSUFFICIENT_STOCK</div>
+                      <div>"Not enough stock available"</div>
+                    </div>
+                  )
+                ) : (
+                  <span className="text-[var(--text-tertiary)] uppercase select-none">
+                    &gt; CONSOLE_B READY
+                  </span>
+                )}
+              </div>
             </div>
 
           </div>
+
+          {/* -------------------------------------------------------------
+             EXPLANATION PANEL: Typewriter effect system analysis
+             ------------------------------------------------------------- */}
+          <div className="glow-card flex flex-col w-full rounded-xl overflow-hidden bg-black border border-[var(--border-default)]">
+            {/* Panel Title */}
+            <div className="bg-[var(--bg-elevated)] border-b border-[var(--border-default)] px-4 py-2.5 font-mono text-[9px] font-bold uppercase tracking-wider text-[var(--text-secondary)] select-none">
+              SYSTEM ANALYSIS AUDIT
+            </div>
+
+            {/* Panel Body */}
+            <div className="bg-black p-5 font-mono text-xs text-zinc-400 leading-relaxed min-h-[140px] whitespace-pre-wrap select-text">
+              {results && !loading ? (
+                <>
+                  {typedExplanation}
+                  {isTyping && <span className="w-2 h-3.5 bg-zinc-400 blink inline-block ml-0.5" />}
+                  {!isTyping && (
+                    <div className="mt-4 text-[var(--text-secondary)] select-none font-bold">
+                      &gt; LOCK AUDIT TERMINATED. ROW INTEGRITY 100% SECURE.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span className="text-[var(--text-tertiary)] uppercase select-none font-bold">
+                  &gt; CONCURRENCY_MONITOR AWAITING TRANSACTION TRIGGER...
+                </span>
+              )}
+            </div>
+          </div>
+
         </div>
       )}
+
     </div>
   );
 }

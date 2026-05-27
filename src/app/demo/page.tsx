@@ -24,15 +24,8 @@ export default async function DemoPage() {
     availableUnits: s.totalUnits - s.reservedUnits,
   }));
 
-  // Filter out completely sold-out combinations to ensure demonstration reliability
-  const activeCombos = combos.filter((c) => c.availableUnits > 0);
+  // Filter only product-warehouse combinations with exactly 1 unit available
+  const activeCombos = combos.filter((c) => c.availableUnits === 1);
 
-  // Sort: Put combinations with exactly 1 unit available first in the list, followed by others
-  const sortedCombos = activeCombos.sort((a, b) => {
-    if (a.availableUnits === 1 && b.availableUnits !== 1) return -1;
-    if (a.availableUnits !== 1 && b.availableUnits === 1) return 1;
-    return a.availableUnits - b.availableUnits;
-  });
-
-  return <DemoClient combos={sortedCombos} />;
+  return <DemoClient combos={activeCombos} />;
 }

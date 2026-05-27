@@ -1,5 +1,5 @@
 import { prisma } from "../lib/db";
-import ProductGrid from "../components/ProductGrid";
+import InventoryClient from "../components/InventoryClient";
 import RefreshWrapper from "../components/RefreshWrapper";
 
 // Ensure this page is rendered dynamically on every request so stock levels are always live
@@ -32,7 +32,27 @@ export default async function Home() {
     });
   }
 
-  // 3. Fetch all products ordered by name and include stock levels mapped to their warehouses
+  // 3. Query system-wide stats counts
+  const activeHolds = await prisma.reservation.count({
+    where: {
+      status: "PENDING",
+      expiresAt: {
+        gt: new Date(),
+      },
+    },
+  });
+
+  const totalProducts = await prisma.product.count();
+  const totalWarehouses = await prisma.warehouse.count();
+
+  // 4. Fetch all warehouses ordered by name
+  const warehouses = await prisma.warehouse.findMany({
+    orderBy: {
+      name: "asc",
+    },
+  });
+
+  // 5. Fetch all products ordered by name and include stock levels mapped to their warehouses
   const products = await prisma.product.findMany({
     orderBy: {
       name: "asc",
@@ -51,14 +71,14 @@ export default async function Home() {
     },
   });
 
-  // 4. Format products and calculate available stock levels
+  // 6. Format products and calculate available stock levels
   const formattedProducts = products.map((product) => ({
     id: product.id,
     name: product.name,
     sku: product.sku,
     description: product.description,
     imageUrl: product.imageUrl,
-    createdAt: product.createdAt,
+    createdAt: product.createdAt.toISOString(),
     stocks: product.stocks.map((stock) => ({
       warehouseId: stock.warehouse.id,
       warehouseName: stock.warehouse.name,
@@ -69,27 +89,26 @@ export default async function Home() {
     })),
   }));
 
+  // 7. Format warehouses list
+  const formattedWarehouses = warehouses.map((wh) => ({
+    id: wh.id,
+    name: wh.name,
+    location: wh.location,
+  }));
+
   return (
-    <div className="space-y-10">
-      {/* Auto-refresher client component */}
+    <div className="w-full">
+      {/* Auto-refresher client component (refreshes in background silently) */}
       <RefreshWrapper />
 
-      {/* Header section */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border pb-6">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-zinc-100">Available Products</h1>
-          <p className="text-sm text-muted-foreground mt-1.5">
-            Reserve items before checkout — holds last 10 minutes.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-primary/20 bg-primary/5 self-start">
-          <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-          <span className="text-xs font-semibold text-primary uppercase tracking-wider">Stock is live</span>
-        </div>
-      </div>
-
-      {/* Product Grid (Client Wrapper for Interactive Modal bindings) */}
-      <ProductGrid products={formattedProducts} />
+      {/* Main Interactive Inventory Dashboard */}
+      <InventoryClient
+        products={formattedProducts}
+        warehouses={formattedWarehouses}
+        activeHolds={activeHolds}
+        totalProducts={totalProducts}
+        totalWarehouses={totalWarehouses}
+      />
     </div>
   );
 }

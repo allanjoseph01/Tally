@@ -1,125 +1,224 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
+@config "../../tailwind.config.ts";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+:root {
+  /* -------------------------------------------------------------
+     Premium Charcoal Carbon & Vibrant Royal Blue Theme Variables
+     ------------------------------------------------------------- */
+  --bg-base: #0E0E10;       /* Deep minimalist Carbon Charcoal (Premium lighter shade than pitch black) */
+  --bg-surface: #161619;    /* Graphite-900 (High-fidelity card layers) */
+  --bg-elevated: #202024;   /* Graphite-800 (Clean, modern elevated controls) */
+  
+  /* Translucent border values for glass glowing panels */
+  --border-default: rgba(255, 255, 255, 0.05);
+  --border-subtle: rgba(255, 255, 255, 0.02);
+  --border-active: rgba(255, 255, 255, 0.12);
+  
+  --text-primary: #F3F4F6;  /* zinc-100 */
+  --text-secondary: #9CA3AF; /* zinc-400 */
+  --text-tertiary: #4B5563;  /* zinc-600 */
+  
+  /* Curated glowing royal blue accent */
+  --accent-primary: #3B82F6;
+  --accent-hover: #60A5FA;
+  --accent-muted: rgba(59, 130, 246, 0.08);
+  
+  --success: #10B981;
+  --success-muted: rgba(16, 185, 129, 0.08);
+  
+  --warning: #F59E0B;
+  --warning-muted: rgba(245, 158, 11, 0.08);
+  
+  --danger: #EF4444;
+  --danger-muted: rgba(239, 68, 68, 0.08);
+  
+  --pending: #3B82F6;
+  --pending-muted: rgba(59, 130, 246, 0.08);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  
-  --radius-lg: var(--radius);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  
+  /* Map standard theme variables so shadcn / tailwind base styles pick them up directly */
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --popover: var(--bg-surface);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--accent-primary);
+  --primary-foreground: #FFFFFF;
+  --secondary: var(--bg-surface);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-surface);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--accent-primary);
+  --accent-foreground: #FFFFFF;
+  --destructive: var(--danger);
+  --destructive-foreground: var(--text-primary);
+  --border: var(--border-default);
+  --input: var(--border-default);
+  --ring: var(--accent-primary);
+  --radius: 8px;
+}
+
+@theme {
+  --color-background: var(--bg-base);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--bg-surface);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-surface);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent-primary);
+  --color-primary-foreground: #FFFFFF;
+  --color-secondary: var(--bg-surface);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--bg-surface);
+  --color-muted-foreground: var(--text-secondary);
+  --color-accent: var(--accent-primary);
+  --color-accent-foreground: #FFFFFF;
+  --color-destructive: var(--danger);
+  --color-border: var(--border-default);
+  --color-input: var(--border-default);
+  --color-ring: var(--accent-primary);
+
+  --radius-lg: 12px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius: 8px;
+
   /* Custom extended semantic colors */
   --color-warning: var(--warning);
   --color-danger: var(--danger);
-  --color-emerald-accent: var(--emerald);
+  --color-success: var(--success);
+  --color-emerald-accent: var(--success);
+
+  /* Font mapping - Sleek developer fonts */
+  --font-sans: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  --font-mono: 'var(--font-geist-mono)', 'IBM Plex Mono', monospace;
 
   /* Custom animations */
-  --animate-pulse-soft: pulse-soft 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-countdown-urgent: countdown-urgent 0.8s ease-in-out infinite;
-  --animate-slide-in: slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-
-  @keyframes slide-in {
-    from {
-      transform: translateY(-0.5rem);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
-
-  @keyframes pulse-soft {
-    0%, 100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-    50% {
-      opacity: 0.6;
-      transform: scale(0.985);
-    }
-  }
-
-  @keyframes countdown-urgent {
-    0%, 100% {
-      color: #ef4444;
-      transform: scale(1);
-      text-shadow: 0 0 0px rgba(239, 68, 68, 0);
-    }
-    50% {
-      color: #f87171;
-      transform: scale(1.05);
-      text-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
-    }
-  }
+  --animate-blink: blink 1.2s step-end infinite;
+  --animate-scan: scan 4s linear infinite;
+  --animate-pulse-orange: pulse-orange 2s infinite;
+  --animate-pulse-green: pulse-green 2s infinite;
+  --animate-count-flash: count-flash 0.5s ease-out;
 }
 
-:root {
-  /* Precision Commerce Theme Colors (Near-Black Dark Theme by Default) */
-  --background: #09090b; /* zinc-950 background */
-  --foreground: #f4f4f5; /* zinc-100 primary text */
-  --card: #121214;       /* zinc-900 styled surface cards */
-  --card-foreground: #f4f4f5;
-  --popover: #121214;
-  --popover-foreground: #f4f4f5;
-  --primary: #10b981;    /* emerald-500 primary accent */
-  --primary-foreground: #09090b;
-  --secondary: #18181b;  /* zinc-800 border-level surface values */
-  --secondary-foreground: #f4f4f5;
-  --muted: #18181b;
-  --muted-foreground: #a1a1aa; /* zinc-400 secondary text */
-  --accent: #10b981;
-  --accent-foreground: #09090b;
-  --destructive: #ef4444; /* red-500 danger/expired color */
-  --border: #27272a;     /* zinc-800 borders */
-  --input: #27272a;
-  --ring: #10b981;
-  --radius: 0.75rem;     /* rounded-lg borders (12px) */
+/* -------------------------------------------------------------
+   Typography Override (Premium Sans Default, Monospace Details)
+   ------------------------------------------------------------- */
+html, body {
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
 
-  /* Semantic UI tokens */
-  --warning: #fbbf24;    /* amber-400 warning status */
-  --danger: #ef4444;     /* red-500 expired status */
-  --emerald: #10b981;    /* emerald-500 success status */
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  
+  /* Subtle glass high-fidelity blueprint grid background */
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.007) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.007) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-attachment: fixed;
+}
 
-  --font-sans: var(--font-geist-sans);
+/* Monospace fonts for raw numbers, IDs, status, logs */
+.font-mono, pre, code {
+  font-family: 'var(--font-geist-mono)', 'IBM Plex Mono', monospace !important;
 }
 
 /* Premium noise overlay for micro-texture detail and depth */
 .bg-noise {
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0%200%20200%20200'%20xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter%20id='noiseFilter'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.75'%20numOctaves='3'%20stitchTiles='stitch'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url(%23noiseFilter)'%20opacity='0.035'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0%200%20200%20200'%20xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter%20id='noiseFilter'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.75'%20numOctaves='3'%20stitchTiles='stitch'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url(%23noiseFilter)'%20opacity='0.015'/%3E%3C/svg%3E");
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
-  }
+/* Custom premium rounded scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary);
+}
+
+/* -------------------------------------------------------------
+   Utility Animations
+   ------------------------------------------------------------- */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes pulse-orange {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+}
+
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+}
+
+@keyframes count-flash {
+  0% { color: var(--accent-primary); }
+  100% { color: var(--text-primary); }
+}
+
+@keyframes flash-orange {
+  0% { background-color: rgba(59, 130, 246, 0.2); }
+  100% { background-color: transparent; }
+}
+
+.blink {
+  animation: blink 1.2s step-end infinite;
+}
+
+.pulse-orange {
+  animation: pulse-orange 2s infinite;
+}
+
+.pulse-green {
+  animation: pulse-green 2s infinite;
+}
+
+.flash-orange {
+  animation: flash-orange 0.8s ease-out;
+}
+
+/* -------------------------------------------------------------
+   Terminal-inspired interactive details (premium UI polish)
+   ------------------------------------------------------------- */
+input, textarea, select, button {
+  outline: none !important;
+}
+
+button:focus-visible, input:focus-visible {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 2px var(--accent-muted) !important;
+}
+
+/* Linear-like glowing hover card borders */
+.glow-card {
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glow-card:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 10px 30px -15px rgba(59, 130, 246, 0.1);
 }
