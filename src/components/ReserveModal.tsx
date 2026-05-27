@@ -86,6 +86,23 @@ export default function ReserveModal({
         return;
       }
 
+      // Store reservation in localStorage to prevent double-reserves
+      try {
+        const existing = localStorage.getItem("tally_reservations");
+        const reservations = existing ? JSON.parse(existing) : [];
+        const filtered = reservations.filter((r: any) => r.id !== data.id);
+        filtered.push({
+          id: data.id,
+          productId: product.id,
+          warehouseId: warehouse.id,
+          expiresAt: data.expiresAt,
+          status: "PENDING"
+        });
+        localStorage.setItem("tally_reservations", JSON.stringify(filtered));
+      } catch (err) {
+        console.error("Failed to save reservation to localStorage", err);
+      }
+
       // Success: redirect to the reservation confirm/release page
       router.push(`/reservation/${data.id}`);
     } catch (err: any) {

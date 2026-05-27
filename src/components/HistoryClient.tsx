@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { Check, Clipboard, Clock, Loader2, RefreshCw } from "lucide-react";
 
@@ -153,10 +154,14 @@ export default function HistoryClient() {
                 return (
                   <tr
                     key={res.id}
-                    className="hover:bg-zinc-900/20 transition-colors text-zinc-300"
+                    className={`transition-colors text-zinc-300 ${
+                      res.status === "PENDING"
+                        ? "bg-primary/[0.03] hover:bg-primary/[0.06]"
+                        : "hover:bg-zinc-900/20"
+                    }`}
                   >
                     {/* Copy-on-click truncated monospace ID */}
-                    <td className="py-4.5 px-6 font-mono">
+                    <td className={`py-4.5 px-6 font-mono ${res.status === "PENDING" ? "border-l-2 border-primary" : ""}`}>
                       <button
                         onClick={() => handleCopy(res.id)}
                         className="group flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 transition-colors"
@@ -212,6 +217,16 @@ export default function HistoryClient() {
                         <span className="text-zinc-600 font-sans uppercase text-[9px] tracking-wide pr-1">Expires:</span>
                         {new Date(res.expiresAt).toLocaleTimeString()}
                       </div>
+                      {res.status === "PENDING" && (
+                        <div className="pt-1.5">
+                          <Link
+                            href={`/reservation/${res.id}`}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold py-1.5 px-3 rounded border border-primary/20 bg-primary/5 text-primary hover:bg-primary/15 transition-colors cursor-pointer"
+                          >
+                            Continue to Checkout →
+                          </Link>
+                        </div>
+                      )}
                       {res.status === "CONFIRMED" && (
                         <div className="text-primary/70">
                           <span className="text-zinc-600 font-sans uppercase text-[9px] tracking-wide pr-1">Sold at:</span>

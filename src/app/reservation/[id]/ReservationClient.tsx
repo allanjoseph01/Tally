@@ -49,6 +49,50 @@ export default function ReservationClient({ reservation }: ReservationClientProp
 
   const [timeLeft, setTimeLeft] = useState(getSecondsLeft());
 
+  // Synchronize reservation status in localStorage on mount and updates
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const existing = localStorage.getItem("tally_reservations");
+      const list = existing ? JSON.parse(existing) : [];
+      const index = list.findIndex((r: any) => r.id === reservation.id);
+      if (index > -1) {
+        list[index].status = reservation.status;
+        list[index].expiresAt = reservation.expiresAt;
+        localStorage.setItem("tally_reservations", JSON.stringify(list));
+      } else {
+        list.push({
+          id: reservation.id,
+          productId: reservation.product.id,
+          warehouseId: reservation.warehouse.id,
+          expiresAt: reservation.expiresAt,
+          status: reservation.status
+        });
+        localStorage.setItem("tally_reservations", JSON.stringify(list));
+      }
+    } catch (err) {
+      console.error("Failed to sync reservation in localStorage", err);
+    }
+  }, [reservation.id, reservation.status, reservation.expiresAt, reservation.product.id, reservation.warehouse.id]);
+
+  // Synchronize status updates in localStorage (e.g. confirm, cancel, release)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const existing = localStorage.getItem("tally_reservations");
+      if (existing) {
+        const list = JSON.parse(existing);
+        const index = list.findIndex((r: any) => r.id === reservation.id);
+        if (index > -1 && list[index].status !== status) {
+          list[index].status = status;
+          localStorage.setItem("tally_reservations", JSON.stringify(list));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to update status in localStorage", err);
+    }
+  }, [status, reservation.id]);
+
   // Countdown timer clock loop
   useEffect(() => {
     if (status !== "PENDING") return;
