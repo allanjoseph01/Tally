@@ -2,7 +2,7 @@
 > An active inventory reservation platform that holds stock at checkout, confirms holds on payment, and auto-releases holds on expiration or cancellations. Built to handle massive concurrent traffic with absolute data consistency.
 
 ## Live Demo
-🚀 **[Tally Live Deployment](https://tally-inventory.vercel.app)**  
+🚀 **[Tally Live Deployment](https://tally-tool.netlify.app)**  
 *The platform is pre-loaded with seed data. You can test the end-to-end checkout reservation flow, view the real-time activity ledger, and run concurrent race condition simulations.*
 
 ---
@@ -45,44 +45,27 @@ Tally's atomic `UPDATE` approach performs a optimistic-like lock on writes while
 
 ## How Expiry Works in Production
 
-Temporary locks require a cleanup mechanism. Tally implements a **hybrid expiry architecture** that combines passive and active strategies:
+Two-layer hybrid approach:
 
-```
-                  +---------------------------------------+
-                  |           GET /api/products           |
-                  |          (Passive / Lazy)             |
-                  +-------------------+-------------------+
-                                      |
-                                      v
-                        Runs Raw SQL Expiry Check
-                        Resets Stock & Releases Holds
-                                      |
-                                      v
-                  +-------------------+-------------------+
-                  |          Vercel Cron Job              |
-                  |          (Active / 1-Min)             |
-                  +---------------------------------------+
-```
+**Layer 1 — Lazy cleanup on read (immediate correctness)**  
+Every call to GET /api/products runs a cleanup query first —
+any PENDING reservation past its expiresAt is immediately 
+set to RELEASED and its reservedUnits are returned to available stock.
+This means stock counts are always accurate the moment a user 
+loads the product page, with zero delay.
 
-### 1. Active Expiry: Vercel Cron Job
-An active background worker is scheduled via Vercel Crons to run every minute. It executes a `GET` request to `/api/cron/expire-reservations` (protected by a `CRON_SECRET` bearer token), identifies all `PENDING` holds where `expiresAt < NOW()`, and transitions them to `RELEASED` while returning the units to the stock pool inside a single database transaction.
+**Layer 2 — cron-job.org scheduled job (background janitor)**  
+An external cron via cron-job.org hits 
+GET /api/cron/expire-reservations every minute.
+This cleans up expired reservations that no one ever reads —
+for example, a user who reserved and then closed their browser.
+The endpoint is protected with a Bearer token via the 
+Authorization header so it cannot be triggered by anyone else.
 
-### 2. Passive Expiry: Lazy Cleanup on Read
-Relying *only* on a 1-minute cron means there is a small window (up to 59 seconds) where stock counts shown to users could be incorrect. 
-
-To solve this, Tally implements **lazy cleanup** inside the `GET /api/products` handler. Before returning the product list, it runs a raw PostgreSQL query to find and release all expired pending holds:
-
-```sql
-UPDATE "Stock" s
-SET "reservedUnits" = s."reservedUnits" - r.quantity
-FROM "Reservation" r  
-WHERE r."stockId" = s.id
-AND r.status = 'PENDING'
-AND r."expiresAt" < NOW()
-RETURNING r.id
-```
-
-It then transitions the returned reservation IDs to `RELEASED`. This ensures that **read operations are always 100% correct in real time**, even if the active cron job hasn't run yet.
+Why not Vercel Cron?
+Vercel's free tier does not support cron jobs. The app is deployed 
+on Netlify. cron-job.org provides equivalent functionality 
+for free with no infrastructure overhead.
 
 ---
 
@@ -130,6 +113,15 @@ UPSTASH_REDIS_REST_TOKEN="your-redis-token"
 CRON_SECRET="your-local-cron-secret-12345"
 ```
 
+#### Environment Variables Reference
+
+| Environment Variable | Description |
+| :--- | :--- |
+| **DATABASE_URL** | Connection string for your PostgreSQL database (e.g., Neon). |
+| **UPSTASH_REDIS_REST_URL** | REST URL for the serverless Upstash Redis instance (for rate limiting). |
+| **UPSTASH_REDIS_REST_TOKEN** | REST active token for Upstash Redis. |
+| **CRON_SECRET** | Bearer token that protects the expiry endpoint. Must match the Authorization header configured in cron-job.org. |
+
 ### Step 3: Push Database Schema
 Apply the schema directly to your Postgres database:
 ```bash
@@ -147,6 +139,20 @@ npx prisma db seed
 npm run dev
 ```
 Open **[http://localhost:3000](http://localhost:3000)** in your browser to view the application.
+
+---
+
+## Deploying to Netlify
+
+To deploy Tally to Netlify:
+
+1. **Configure Environment Variables** in the Netlify UI under **Site settings > Environment variables**:
+   - `DATABASE_URL` — Connection string for your PostgreSQL database (e.g., Neon).
+   - `UPSTASH_REDIS_REST_URL` — REST URL for serverless Redis (for rate limiting).
+   - `UPSTASH_REDIS_REST_TOKEN` — REST token for serverless Redis.
+   - `CRON_SECRET` — Bearer token that protects the expiry endpoint. Must match the Authorization header configured in cron-job.org.
+2. Netlify will build and deploy the Next.js app using `@netlify/plugin-nextjs`.
+3. Set up a cron job on [cron-job.org](https://cron-job.org) pointing to your deployment's `/api/cron/expire-reservations` route, running every minute, with an `Authorization` header set to `Bearer <your-cron-secret>`.
 
 ---
 
