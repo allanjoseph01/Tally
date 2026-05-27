@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/db";
+import redis from "../../../lib/redis";
 import { ReservationRequestSchema, ReservationResponseSchema } from "../../../lib/schemas";
 
 export async function POST(request: NextRequest) {
@@ -9,21 +10,9 @@ export async function POST(request: NextRequest) {
   try {
     // 1. IDEMPOTENCY CHECK
     if (idempotencyKey) {
-      const existingKey = await prisma.idempotencyKey.findUnique({
-        where: { key: idempotencyKey },
-      });
-
-      if (existingKey) {
-        try {
-          const body = JSON.parse(existingKey.responseBody);
-          return NextResponse.json(body, { status: existingKey.responseStatus });
-        } catch (e) {
-          // Fallback if parsing ever fails for some reason
-          return new NextResponse(existingKey.responseBody, {
-            status: existingKey.responseStatus,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+      const cached = await redis.get<{ status: number; body: unknown }>(`idem:${idempotencyKey}`);
+      if (cached) {
+        return NextResponse.json(cached.body, { status: cached.status });
       }
     }
 
@@ -34,9 +23,6 @@ export async function POST(request: NextRequest) {
       const errorMsg = validation.error.issues[0]?.message || "Invalid validation error";
       const errorResponse = { error: errorMsg };
       
-      if (idempotencyKey) {
-        await saveIdempotency(idempotencyKey, 400, errorResponse);
-      }
       return NextResponse.json(errorResponse, { status: 400 });
     }
 
@@ -51,9 +37,6 @@ export async function POST(request: NextRequest) {
 
     if (!stock) {
       const errorResponse = { error: "Stock record not found" };
-      if (idempotencyKey) {
-        await saveIdempotency(idempotencyKey, 404, errorResponse);
-      }
       return NextResponse.json(errorResponse, { status: 404 });
     }
 
@@ -131,7 +114,11 @@ export async function POST(request: NextRequest) {
 
       // 5. IDEMPOTENCY SAVE (Success)
       if (idempotencyKey) {
-        await saveIdempotency(idempotencyKey, 201, responseData);
+        await redis.set(
+          `idem:${idempotencyKey}`,
+          { status: 201, body: responseData },
+          { ex: 3600 }
+        );
       }
 
       // 6. Return 201
@@ -143,9 +130,6 @@ export async function POST(request: NextRequest) {
           error: "Not enough stock available",
           code: "INSUFFICIENT_STOCK",
         };
-        if (idempotencyKey) {
-          await saveIdempotency(idempotencyKey, 409, errorResponse);
-        }
         return NextResponse.json(errorResponse, { status: 409 });
       }
 
@@ -162,20 +146,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Graceful save idempotency helper
-async function saveIdempotency(key: string, status: number, body: any) {
-  try {
-    await prisma.idempotencyKey.create({
-      data: {
-        key,
-        responseStatus: status,
-        responseBody: JSON.stringify(body),
-      },
-    });
-  } catch (err) {
-    console.error("Failed to save idempotency key:", err);
-  }
-}
+
 
 // GET Handler to return the last 50 reservations ordered by createdAt desc
 export async function GET() {

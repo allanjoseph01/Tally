@@ -3,7 +3,7 @@
 
 ## Live Demo
 🚀 **[Tally Live Deployment](https://tally-tool.netlify.app)**  
-*The platform is pre-loaded with seed data. You can test the end-to-end checkout reservation flow, view the real-time activity ledger, and run concurrent race condition simulations.*
+*The platform is pre-loaded with seed data. You can test the end-to-end checkout reservation flow, view the real-time activity ledger, and run the concurrency demo to see the atomic UPDATE guarantee in action.*
 
 ---
 
@@ -74,12 +74,12 @@ To prevent double-charging or duplicate reservations caused by network retries o
 
 ### The Design
 1. The client generates a unique UUID (an `Idempotency-Key`) in the browser and attaches it as an HTTP header.
-2. The server interceptor checks the `IdempotencyKey` table. If the key exists, it instantly returns the cached status code and response payload without executing any database side effects.
+2. The server checks Redis for the key (`idem:{key}`). If found, it instantly returns the cached status code and response payload without executing any database side effects. Keys are stored with a 1-hour TTL — Redis handles expiry automatically, no cleanup job needed.
 3. If the key is new, the server processes the transaction, caches the resulting HTTP status and JSON response body, and serves the request.
 
 ### Example cURL Request
 ```bash
-curl -X POST https://tally-inventory.vercel.app/api/reservations \
+curl -X POST https://tally-tool.netlify.app/api/reservations \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: c81b3793-bc42-4fcf-b7d6-3e8df3cc4d10" \
   -d '{
@@ -148,7 +148,7 @@ To deploy Tally to Netlify:
 
 1. **Configure Environment Variables** in the Netlify UI under **Site settings > Environment variables**:
    - `DATABASE_URL` — Connection string for your PostgreSQL database (e.g., Neon).
-   - `UPSTASH_REDIS_REST_URL` — REST URL for serverless Redis (for rate limiting).
+   - `UPSTASH_REDIS_REST_URL` — REST URL for serverless Upstash Redis instance (for idempotency key caching).
    - `UPSTASH_REDIS_REST_TOKEN` — REST token for serverless Redis.
    - `CRON_SECRET` — Bearer token that protects the expiry endpoint. Must match the Authorization header configured in cron-job.org.
 2. Netlify will build and deploy the Next.js app using `@netlify/plugin-nextjs`.
@@ -160,7 +160,7 @@ To deploy Tally to Netlify:
 
 If given more development time, the following production features would be prioritized:
 
-*   **Distributed Locking with Redis (Redlock)**: While row-level locking in PostgreSQL guarantees 100% safety, keeping transactions open while waiting for locks degrades DB performance under extreme scale. Offloading the distributed holding lock to an in-memory Redis cluster (Redlock pattern) would protect the DB and scale to millions of concurrent checkout requests.
+*   **Distributed Locking with Redis (Redlock)**: While the atomic UPDATE approach guarantees correctness at the single-database level, a multi-region deployment with read replicas would require distributed coordination. Offloading this to an in-memory Redis cluster using the Redlock pattern would allow Tally to scale to millions of concurrent checkout requests across regions without relying solely on PostgreSQL row contention.
 *   **WebSockets / SSE for Real-time Stock Pushes**: Currently, the homepage polls the server using Next.js router refreshes every 30 seconds. Implementing Server-Sent Events (SSE) or WebSockets would allow Tally to push stock updates and reservations immediately to all active clients, providing a truly live, interactive inventory map.
 *   **Comprehensive Concurrency Integration Testing**: Writing automated integration tests using libraries like `artillery` or custom worker threads to fire 100+ concurrent requests at exactly the same millisecond to verify that database row counts never drop below 0.
 *   **Webhook notifications**: Triggering webhooks on stock changes so external warehouse dispatch systems are notified the split-second a hold transitions to `CONFIRMED` or is `RELEASED`.

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/db";
+import redis from "../../../../../lib/redis";
 import { ReservationResponseSchema } from "../../../../../lib/schemas";
 
 export async function POST(
@@ -12,20 +13,9 @@ export async function POST(
   try {
     // 1. IDEMPOTENCY CHECK
     if (idempotencyKey) {
-      const existingKey = await prisma.idempotencyKey.findUnique({
-        where: { key: idempotencyKey },
-      });
-
-      if (existingKey) {
-        try {
-          const body = JSON.parse(existingKey.responseBody);
-          return NextResponse.json(body, { status: existingKey.responseStatus });
-        } catch (e) {
-          return new NextResponse(existingKey.responseBody, {
-            status: existingKey.responseStatus,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+      const cached = await redis.get<{ status: number; body: unknown }>(`idem:${idempotencyKey}`);
+      if (cached) {
+        return NextResponse.json(cached.body, { status: cached.status });
       }
     }
 
@@ -36,9 +26,6 @@ export async function POST(
 
     if (!reservation) {
       const errorResponse = { error: "Reservation not found" };
-      if (idempotencyKey) {
-        await saveIdempotency(idempotencyKey, 404, errorResponse);
-      }
       return NextResponse.json(errorResponse, { status: 404 });
     }
 
@@ -66,18 +53,12 @@ export async function POST(
         code: "RESERVATION_EXPIRED",
       };
       
-      if (idempotencyKey) {
-        await saveIdempotency(idempotencyKey, 410, errorResponse);
-      }
       return NextResponse.json(errorResponse, { status: 410 });
     }
 
     // 4. CHECK STATS (MUST BE PENDING)
     if (reservation.status !== "PENDING") {
       const errorResponse = { error: "Reservation is not in a confirmable state" };
-      if (idempotencyKey) {
-        await saveIdempotency(idempotencyKey, 409, errorResponse);
-      }
       return NextResponse.json(errorResponse, { status: 409 });
     }
 
@@ -145,7 +126,11 @@ export async function POST(
 
     // 6. SAVE IDEMPOTENCY KEY (Success)
     if (idempotencyKey) {
-      await saveIdempotency(idempotencyKey, 200, responseData);
+      await redis.set(
+        `idem:${idempotencyKey}`,
+        { status: 200, body: responseData },
+        { ex: 3600 }
+      );
     }
 
     // Return 200 with updated reservation
@@ -161,17 +146,4 @@ export async function POST(
   }
 }
 
-// Graceful save idempotency helper
-async function saveIdempotency(key: string, status: number, body: any) {
-  try {
-    await prisma.idempotencyKey.create({
-      data: {
-        key,
-        responseStatus: status,
-        responseBody: JSON.stringify(body),
-      },
-    });
-  } catch (err) {
-    console.error("Failed to save idempotency key:", err);
-  }
-}
+

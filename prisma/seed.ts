@@ -58,7 +58,6 @@ async function main() {
     await tx.stock.deleteMany();
     await tx.product.deleteMany();
     await tx.warehouse.deleteMany();
-    await tx.idempotencyKey.deleteMany();
 
     console.log("Inserting warehouses...");
     const warehouses = await Promise.all(
@@ -82,7 +81,7 @@ async function main() {
     const stand = products.find((p) => p.sku === "LSA-ADJ-005")!;
 
     console.log("Creating stock entries with varied quantities...");
-    
+
     // Product 1: Noise-Cancelling Headphones Pro
     // - Mumbai Central: exactly 1 unit (compelling race condition demo!)
     // - Delhi North Hub: 15 units
