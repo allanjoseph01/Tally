@@ -2,7 +2,8 @@
 > An active inventory reservation platform that holds stock at checkout, confirms holds on payment, and auto-releases holds on expiration or cancellations. Built to handle massive concurrent traffic with absolute data consistency.
 
 ## Live Demo
-🚀 **[Tally Live Deployment](https://tally-tool.netlify.app)**  
+**[Tally Live Deployment](https://tally-tool.netlify.app)**  
+**[Tally End-to-End Demo Video](https://drive.google.com/file/d/1yz032tlt3wgABZu6u3MQAOlQpHCNuy3M/view?usp=sharing)**
 *The platform is pre-loaded with seed data. You can test the end-to-end checkout reservation flow, view the real-time activity ledger, and run the concurrency demo to see the atomic UPDATE guarantee in action.*
 
 ---
